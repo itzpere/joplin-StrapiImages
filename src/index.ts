@@ -1,53 +1,73 @@
+// Import necessary modules and types
 import joplin from 'api';
 import { SettingItemType, ToolbarButtonLocation } from 'api/types';
+import * as os from 'os';
 
+
+// Constants for setting section and key names
+const SECTION = "StrapiImagesPlugin";
+const SETTING_API_KEY = "apiKey";
+const SETTING_STRAPI_URL = "strapiUrl";
+const SETTING_RESOURCES_PATH = "joplinResourcesPath";
+
+// Register all settings for the plugin
 async function registerAllSettings() {
-    const section = "StrapiImagesPlugin";
-
-    await joplin.settings.registerSection(section, {
+    await joplin.settings.registerSection(SECTION, {
         label: "Strapi Images Plugin",
         description: "Settings for the Strapi Images Plugin",
         iconName: "fas fa-images"
     });
 
     await joplin.settings.registerSettings({
-        "apiKey": { 
+        [SETTING_API_KEY]: {
             public: true,
-            section: section,
+            section: SECTION,
             type: SettingItemType.String,
             value: "",
             label: "API Key",
             description: "Enter your Strapi API key for the image upload service.",
         },
-        "strapiUrl": {
+        [SETTING_STRAPI_URL]: {
             public: true,
-            section: section,
+            section: SECTION,
             type: SettingItemType.String,
             value: "",
             label: "Strapi URL",
-            description: "Enter the base URL of your Strapi instance (e.g., https://cms.itzpere.com).",
+            description: "Enter the base URL of your Strapi instance (e.g., https://cms.example.com).",
         },
-        "joplinResourcesPath": {
+        [SETTING_RESOURCES_PATH]: {
             public: true,
-            section: section,
+            section: SECTION,
             type: SettingItemType.String,
-            value: "/home/pere/.config/joplin-desktop/resources",
+            value: "~/.config/joplin-desktop/resources",
             label: "Joplin Resources Path",
-            description: "Enter the path to the Joplin resources directory.",
+            description: "Enter the path to the Joplin resources directory, use ~ for the home directory.",
         }
     });
 }
 
+// Replace ~ with the user's home directory in the file path
+function expandHomeDir(path) {
+    if (path.startsWith('~')) {
+        return os.homedir() + path.slice(1);
+    }
+    return path;
+}
+
+// Upload image to Strapi
 async function uploadImageToStrapi(apiKey, strapiUrl, imageData) {
     try {
         console.log('Image Data:', imageData);
 
-        const resourcesPath = await joplin.settings.value('joplinResourcesPath');
+        let resourcesPath = await joplin.settings.value(SETTING_RESOURCES_PATH);
+        resourcesPath = expandHomeDir(resourcesPath);
         const filePath = `${resourcesPath}/${imageData.id}.${imageData.file_extension}`;
         console.log('File Path:', filePath);
 
+        // Reading the image file from the local filesystem
         const fileData = await fetch(`file://${filePath}`).then(response => response.blob());
 
+        // Creating FormData for the image upload
         const formData = new FormData();
         formData.append('files', fileData, imageData.title);
 
@@ -75,6 +95,7 @@ async function uploadImageToStrapi(apiKey, strapiUrl, imageData) {
     }
 }
 
+// Replace image link in the note with a new URL from Strapi
 async function replaceImageLinkInNote(imageData, newUrl, strapiUrl) {
     try {
         console.log('New URL:', newUrl);
@@ -82,61 +103,44 @@ async function replaceImageLinkInNote(imageData, newUrl, strapiUrl) {
         const note = await joplin.workspace.selectedNote();
         if (!note || !note.body) throw new Error("Note content not found");
 
-        console.log('Note Content:', note.body);
-
         let updatedBody = note.body;
 
         const oldLinkPattern = `!\\[${imageData.title}\\]\\(:\\/${imageData.id}\\)`;
-        console.log('Old Link Pattern:', oldLinkPattern);
 
         const newLink = `![${imageData.title}](${strapiUrl}${newUrl})`;
         updatedBody = updatedBody.replace(new RegExp(oldLinkPattern, 'g'), newLink);
 
-        console.log('Updated Body:', updatedBody);
-
         await joplin.data.put(['notes', note.id], null, { body: updatedBody });
 
-        console.log(`Replaced image link: ${oldLinkPattern} -> ${newUrl}`);
     } catch (error) {
         console.error('Error replacing image link in note:', error);
     }
 }
 
+// Get image resources from the currently selected note
 async function getImagesFromNote() {
-    const note = await joplin.workspace.selectedNote();
-    if (!note) return [];
+    try {
+        const note = await joplin.workspace.selectedNote();
+        if (!note) return [];
 
-    console.log(`Fetching resources for note: ${note.id}`);
+        console.log(`Fetching resources for note: ${note.id}`);
 
-    const imageResources = [];
-    const resources = await joplin.data.get(['notes', note.id, 'resources']);
-    for (let resource of resources.items) {
-        const resourceData = await joplin.data.get(['resources', resource.id], { fields: ['id', 'title', 'file_extension', 'mime'] });
-        if (resourceData.mime.startsWith('image/')) {
-            imageResources.push(resourceData);
+        const imageResources = [];
+        const resources = await joplin.data.get(['notes', note.id, 'resources']);
+        for (let resource of resources.items) {
+            const resourceData = await joplin.data.get(['resources', resource.id], { fields: ['id', 'title', 'file_extension', 'mime'] });
+            if (resourceData.mime.startsWith('image/')) {
+                imageResources.push(resourceData);
+            }
         }
-    }
-    return imageResources;
-}
-
-async function fetchImagesFromStrapi(apiKey, strapiUrl) {
-    const response = await fetch(`${strapiUrl}/api/upload/files`, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-        }
-    });
-
-    if (!response.ok) {
-        console.error('Failed to fetch images from Strapi:', response.statusText);
+        return imageResources;
+    } catch (error) {
+        console.error('Error fetching images from note:', error);
         return [];
     }
-
-    const data = await response.json();
-    console.log('Fetched images:', data);
-    return data;
 }
 
+// Plugin registration and command setup
 joplin.plugins.register({
     onStart: async function() {
         console.log('Strapi Images Plugin starting...');
@@ -147,9 +151,9 @@ joplin.plugins.register({
             label: 'Upload Images',
             iconName: 'fas fa-upload',
             execute: async () => {
-                const apiKey = await joplin.settings.value('apiKey');
-                const strapiUrl = await joplin.settings.value('strapiUrl');
-                
+                const apiKey = await joplin.settings.value(SETTING_API_KEY);
+                const strapiUrl = await joplin.settings.value(SETTING_STRAPI_URL);
+
                 if (!apiKey || !strapiUrl) {
                     await joplin.views.dialogs.showMessageBox('Please set both the API key and Strapi URL in the plugin settings.');
                     return;
@@ -157,7 +161,7 @@ joplin.plugins.register({
 
                 console.log('Fetching images from the note...');
                 const images = await getImagesFromNote();
-                
+
                 if (images.length > 0) {
                     for (const image of images) {
                         console.log(`Uploading image: ${image.title}`);
@@ -170,8 +174,6 @@ joplin.plugins.register({
                         }
                     }
 
-                    const allImages = await fetchImagesFromStrapi(apiKey, strapiUrl);
-                    console.log('All images in Strapi:', allImages);
                 } else {
                     await joplin.views.dialogs.showMessageBox('No images found in the note.');
                 }
