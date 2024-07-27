@@ -19,6 +19,7 @@ export declare const namespacedKey: (pluginId: string, key: string) => string;
  */
 export default class JoplinSettings {
     private plugin_;
+	settingType: any;
     constructor(plugin: Plugin);
     /**
      * Registers new settings.
