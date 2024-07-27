@@ -1,0 +1,15 @@
+{
+	"manifest_version": 1,
+	"id": "com.strapi.images",
+	"app_min_version": "2.13",
+	"version": "1.0.0",
+	"name": "Strapi Images",
+	"description": "Simple plugin for uploading images to strapi and replacing all local images to strapi weblink",
+	"author": "Itzpere",
+	"homepage_url": "https://github.com/itzpere/joplin-StrapiImages",
+	"repository_url": "https://github.com/itzpere/joplin-StrapiImages",
+	"keywords": [],
+	"categories": [],
+	"screenshots": [],
+	"icons": {}
+}
